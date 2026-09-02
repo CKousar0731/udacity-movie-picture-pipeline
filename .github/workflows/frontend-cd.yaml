@@ -131,7 +131,7 @@ jobs:
           kustomize build | kubectl apply -f -
           kubectl rollout status deployment/frontend --timeout=120s || {
                echo "=== NODE STATUS ==="
-               kubectl get nodes -o wide
+               kubectl get nodes -o wide || true
                
                echo "=== POD STATUS ==="
                kubectl get pods -o wide
