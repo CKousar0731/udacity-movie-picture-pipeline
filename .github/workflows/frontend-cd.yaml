@@ -130,6 +130,9 @@ jobs:
           kustomize edit set image frontend=$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
           kustomize build | kubectl apply -f -
           kubectl rollout status deployment/frontend --timeout=120s || {
+               echo "=== NODE STATUS ==="
+               kubectl get nodes -o wide
+               
                echo "=== POD STATUS ==="
                kubectl get pods -o wide
 
