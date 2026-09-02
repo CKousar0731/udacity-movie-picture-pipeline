@@ -5,8 +5,9 @@ push:
 branches:
 - main
 paths:
-- 'starter/frontend/**'
-- '.github/workflows/frontend-cd.yaml'
+- starter/frontend/**
+- .github/workflows/frontend-cd.yaml
+
 workflow_dispatch:
 
 env:
@@ -18,18 +19,20 @@ REACT_APP_MOVIE_API_URL: http://localhost:5000
 jobs:
 lint:
 runs-on: ubuntu-latest
-defaults:
-run:
-working-directory: starter/frontend
 
 ```
+defaults:
+  run:
+    working-directory: starter/frontend
+
 steps:
-  - uses: actions/checkout@v4
+  - name: Checkout code
+    uses: actions/checkout@v4
 
   - name: Setup Node.js
     uses: actions/setup-node@v4
     with:
-      node-version: '18'
+      node-version: "18"
       cache: npm
       cache-dependency-path: starter/frontend/package-lock.json
 
@@ -42,18 +45,20 @@ steps:
 
 test:
 runs-on: ubuntu-latest
-defaults:
-run:
-working-directory: starter/frontend
 
 ```
+defaults:
+  run:
+    working-directory: starter/frontend
+
 steps:
-  - uses: actions/checkout@v4
+  - name: Checkout code
+    uses: actions/checkout@v4
 
   - name: Setup Node.js
     uses: actions/setup-node@v4
     with:
-      node-version: '18'
+      node-version: "18"
       cache: npm
       cache-dependency-path: starter/frontend/package-lock.json
 
@@ -65,15 +70,19 @@ steps:
 ```
 
 build:
-needs: [lint, test]
+needs:
+- lint
+- test
 runs-on: ubuntu-latest
-defaults:
-run:
-working-directory: starter/frontend
 
 ```
+defaults:
+  run:
+    working-directory: starter/frontend
+
 steps:
-  - uses: actions/checkout@v4
+  - name: Checkout code
+    uses: actions/checkout@v4
 
   - name: Configure AWS credentials
     uses: aws-actions/configure-aws-credentials@v4
@@ -89,13 +98,13 @@ steps:
   - name: Build Docker image
     run: |
       docker build \
-        --build-arg REACT_APP_MOVIE_API_URL=${{ env.REACT_APP_MOVIE_API_URL }} \
-        -t ${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
+        --build-arg REACT_APP_MOVIE_API_URL="${REACT_APP_MOVIE_API_URL}" \
+        -t "${ECR_REPOSITORY}:${GITHUB_SHA}" \
         .
 
   - name: Push Docker image
     run: |
-      docker push ${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+      docker push "${ECR_REPOSITORY}:${GITHUB_SHA}"
 ```
 
 deploy:
@@ -104,7 +113,8 @@ runs-on: ubuntu-latest
 
 ```
 steps:
-  - uses: actions/checkout@v4
+  - name: Checkout code
+    uses: actions/checkout@v4
 
   - name: Configure AWS credentials
     uses: aws-actions/configure-aws-credentials@v4
@@ -116,12 +126,13 @@ steps:
   - name: Update kubeconfig
     run: |
       aws eks update-kubeconfig \
-        --name ${{ env.EKS_CLUSTER }} \
-        --region ${{ env.AWS_REGION }}
+        --name "${EKS_CLUSTER}" \
+        --region "${AWS_REGION}"
 
   - name: Deploy frontend
     working-directory: starter/frontend/k8s
     run: |
-      kustomize edit set image frontend=${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+      kustomize edit set image frontend="${ECR_REPOSITORY}:${GITHUB_SHA}"
       kustomize build | kubectl apply -f -
 ```
+
