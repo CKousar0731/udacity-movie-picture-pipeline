@@ -5,9 +5,8 @@ push:
 branches:
 - main
 paths:
-- starter/frontend/**
-- .github/workflows/frontend-cd.yaml
-
+- 'starter/frontend/**'
+- '.github/workflows/frontend-cd.yaml'
 workflow_dispatch:
 
 env:
@@ -19,12 +18,11 @@ REACT_APP_MOVIE_API_URL: http://localhost:5000
 jobs:
 lint:
 runs-on: ubuntu-latest
+defaults:
+run:
+working-directory: starter/frontend
 
 ```
-defaults:
-  run:
-    working-directory: starter/frontend
-
 steps:
   - name: Checkout code
     uses: actions/checkout@v4
@@ -45,12 +43,11 @@ steps:
 
 test:
 runs-on: ubuntu-latest
+defaults:
+run:
+working-directory: starter/frontend
 
 ```
-defaults:
-  run:
-    working-directory: starter/frontend
-
 steps:
   - name: Checkout code
     uses: actions/checkout@v4
@@ -74,12 +71,11 @@ needs:
 - lint
 - test
 runs-on: ubuntu-latest
+defaults:
+run:
+working-directory: starter/frontend
 
 ```
-defaults:
-  run:
-    working-directory: starter/frontend
-
 steps:
   - name: Checkout code
     uses: actions/checkout@v4
@@ -92,7 +88,6 @@ steps:
       aws-region: ${{ env.AWS_REGION }}
 
   - name: Login to Amazon ECR
-    id: login-ecr
     uses: aws-actions/amazon-ecr-login@v2
 
   - name: Build Docker image
