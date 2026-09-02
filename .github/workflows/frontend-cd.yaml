@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'starter/frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+
   workflow_dispatch:
 
 env:
@@ -15,6 +17,10 @@ env:
   REACT_APP_MOVIE_API_URL: http://a5e27b41df3324bb3a276c5bcb2eaa58-1825435127.us-east-1.elb.amazonaws.com
 
 jobs:
+
+  # ============================================================
+  # 1. LINT
+  # ============================================================
   lint:
     name: Lint Frontend
     runs-on: ubuntu-latest
@@ -40,6 +46,10 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+
+  # ============================================================
+  # 2. TEST
+  # ============================================================
   test:
     name: Test Frontend
     runs-on: ubuntu-latest
@@ -65,10 +75,17 @@ jobs:
       - name: Run tests
         run: CI=true npm test
 
+
+  # ============================================================
+  # 3. BUILD
+  # ============================================================
   build:
     name: Build Frontend
     runs-on: ubuntu-latest
-    needs: [lint, test]
+
+    needs:
+      - lint
+      - test
 
     steps:
       - name: Checkout code
@@ -78,18 +95,32 @@ jobs:
         working-directory: starter/frontend
         run: |
           docker build \
-            --build-arg REACT_APP_MOVIE_API_URL=$REACT_APP_MOVIE_API_URL \
+            --build-arg REACT_APP_MOVIE_API_URL="$REACT_APP_MOVIE_API_URL" \
             -t frontend:${{ github.sha }} .
 
+
+  # ============================================================
+  # 4. DEPLOY
+  # ============================================================
   deploy:
     name: Deploy Frontend
     runs-on: ubuntu-latest
-    needs: build
+
+    needs:
+      - build
 
     steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
+
+      # --------------------------------------------------------
+      # Configure AWS
+      # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -97,29 +128,129 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+
+      # --------------------------------------------------------
+      # Verify AWS identity
+      # --------------------------------------------------------
+      - name: Verify AWS identity
+        run: |
+          echo "=== AWS IDENTITY ==="
+          aws sts get-caller-identity
+
+
+      # --------------------------------------------------------
+      # Login to ECR
+      # --------------------------------------------------------
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image to ECR
+
+      # --------------------------------------------------------
+      # Build and push Docker image
+      # --------------------------------------------------------
+      - name: Build and push Docker image
         working-directory: starter/frontend
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_URI=$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+
+          IMAGE_URI="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+
+          echo "Building image:"
+          echo "$IMAGE_URI"
 
           docker build \
-            --build-arg REACT_APP_MOVIE_API_URL=$REACT_APP_MOVIE_API_URL \
-            -t $IMAGE_URI .
+            --build-arg REACT_APP_MOVIE_API_URL="$REACT_APP_MOVIE_API_URL" \
+            -t "$IMAGE_URI" .
 
-          docker push $IMAGE_URI
+          echo "Pushing image to ECR..."
 
+          docker push "$IMAGE_URI"
+
+          echo "Docker image pushed successfully."
+
+
+      # --------------------------------------------------------
+      # Configure kubectl
+      # --------------------------------------------------------
       - name: Configure kubectl
         run: |
+          echo "Configuring kubectl for EKS..."
+
           aws eks update-kubeconfig \
-            --region $AWS_REGION \
-            --name $EKS_CLUSTER_NAME
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+          echo "Current Kubernetes context:"
+          kubectl config current-context
+
+
+      # ========================================================
+      # EKS DIAGNOSTICS
+      # ========================================================
+      # This is the important new section.
+      # It checks why Kubernetes has zero nodes.
+      # ========================================================
+
+      - name: Diagnose EKS cluster
+        run: |
+
+          echo ""
+          echo "=========================================="
+          echo "AWS IDENTITY"
+          echo "=========================================="
+
+          aws sts get-caller-identity
+
+
+          echo ""
+          echo "=========================================="
+          echo "EKS CLUSTER"
+          echo "=========================================="
+
+          aws eks describe-cluster \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME" \
+            --query 'cluster.[name,status,version,platformVersion]' \
+            --output table
+
+
+          echo ""
+          echo "=========================================="
+          echo "KUBERNETES NODES"
+          echo "=========================================="
+
+          kubectl get nodes -o wide || true
+
+
+          echo ""
+          echo "=========================================="
+          echo "AWS-AUTH CONFIGMAP"
+          echo "=========================================="
+
+          kubectl get configmap aws-auth \
+            -n kube-system \
+            -o yaml || true
+
+
+          echo ""
+          echo "=========================================="
+          echo "EKS NODE GROUP"
+          echo "=========================================="
+
+          aws eks describe-nodegroup \
+            --region "$AWS_REGION" \
+            --cluster-name "$EKS_CLUSTER_NAME" \
+            --nodegroup-name udacity \
+            --query 'nodegroup.[status,nodeRole,instanceTypes,subnets,scalingConfig,health]' \
+            --output json || true
+
+
+      # ========================================================
+      # DEPLOY KUBERNETES
+      # ========================================================
 
       - name: Deploy to Kubernetes
         working-directory: starter/frontend/k8s
@@ -127,20 +258,129 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          kustomize edit set image frontend=$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
-          kustomize build | kubectl apply -f -
-          kubectl rollout status deployment/frontend --timeout=120s || {
-               echo "=== NODE STATUS ==="
-               kubectl get nodes -o wide || true
-               
-               echo "=== POD STATUS ==="
-               kubectl get pods -o wide
 
-               echo "=== POD DETAILS ==="
-               kubectl describe pods
+          echo ""
+          echo "=========================================="
+          echo "SETTING KUBERNETES IMAGE"
+          echo "=========================================="
 
-               echo "=== POD LOGS ==="
-               kubectl logs -l app=frontend --all-containers=true --tail=100 || true
+          kustomize edit set image \
+            frontend="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
 
-               exit 1
-          }
+
+          echo ""
+          echo "=========================================="
+          echo "KUSTOMIZE CONFIGURATION"
+          echo "=========================================="
+
+          kustomize build .
+
+
+          echo ""
+          echo "=========================================="
+          echo "APPLYING KUBERNETES MANIFESTS"
+          echo "=========================================="
+
+          kustomize build . | kubectl apply -f -
+
+
+          echo ""
+          echo "=========================================="
+          echo "DEPLOYMENT STATUS"
+          echo "=========================================="
+
+          kubectl get deployment frontend -o wide
+
+
+          echo ""
+          echo "=========================================="
+          echo "SERVICE STATUS"
+          echo "=========================================="
+
+          kubectl get service frontend -o wide
+
+
+          echo ""
+          echo "=========================================="
+          echo "WAITING FOR ROLLOUT"
+          echo "=========================================="
+
+          if ! kubectl rollout status deployment/frontend --timeout=120s; then
+
+            echo ""
+            echo "=========================================="
+            echo "ROLLOUT FAILED"
+            echo "=========================================="
+
+            echo ""
+            echo "=========================================="
+            echo "NODE STATUS"
+            echo "=========================================="
+
+            kubectl get nodes -o wide || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "POD STATUS"
+            echo "=========================================="
+
+            kubectl get pods -o wide || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "DEPLOYMENT DETAILS"
+            echo "=========================================="
+
+            kubectl describe deployment frontend || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "POD DETAILS"
+            echo "=========================================="
+
+            kubectl describe pods -l app=frontend || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "REPLICASETS"
+            echo "=========================================="
+
+            kubectl get replicasets -o wide || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "EVENTS"
+            echo "=========================================="
+
+            kubectl get events \
+              --sort-by='.lastTimestamp' || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "POD LOGS"
+            echo "=========================================="
+
+            kubectl logs \
+              -l app=frontend \
+              --all-containers=true \
+              --tail=100 || true
+
+
+            exit 1
+          fi
+
+
+          echo ""
+          echo "=========================================="
+          echo "DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
+
+          kubectl get pods -o wide
+
+          kubectl get service frontend -o wide
