@@ -1,6 +1,6 @@
 name: Frontend CD
 
-on:
+'on':
 workflow_dispatch:
 
 jobs:
@@ -9,3 +9,4 @@ runs-on: ubuntu-latest
 steps:
 - name: Test
 run: echo "Frontend CD works"
+
