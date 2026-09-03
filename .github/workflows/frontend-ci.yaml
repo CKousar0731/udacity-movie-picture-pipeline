@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "starter/frontend/**"
+      - ".github/workflows/frontend-ci.yaml"
 
   workflow_dispatch:
 
@@ -58,7 +59,7 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: CI=true npm test
+        run: CI=true npm run test
 
   build:
     name: Build Frontend
@@ -90,7 +91,7 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: CI=true npm test
+        run: CI=true npm run test
 
       - name: Build Docker image
         run: |
