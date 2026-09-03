@@ -1,3 +1,4 @@
+```yaml
 name: Frontend Continuous Deployment
 
 on:
@@ -6,7 +7,7 @@ on:
       - main
     paths:
       - 'starter/frontend/**'
-      - '.github/workflows/frontend-ci.yml'
+      - '.github/workflows/frontend-ci.yaml'
 
   workflow_dispatch:
 
@@ -134,12 +135,15 @@ jobs:
       # --------------------------------------------------------
       - name: Verify AWS identity
         run: |
-          echo "=== AWS IDENTITY ==="
+          echo "=========================================="
+          echo "AWS IDENTITY"
+          echo "=========================================="
+
           aws sts get-caller-identity
 
 
       # --------------------------------------------------------
-      # Login to ECR
+      # Login to Amazon ECR
       # --------------------------------------------------------
       - name: Login to Amazon ECR
         id: login-ecr
@@ -147,7 +151,7 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Build and push Docker image
+      # Build and Push Docker Image
       # --------------------------------------------------------
       - name: Build and push Docker image
         working-directory: starter/frontend
@@ -158,14 +162,18 @@ jobs:
 
           IMAGE_URI="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
 
-          echo "Building image:"
+          echo "=========================================="
+          echo "BUILDING FRONTEND IMAGE"
+          echo "=========================================="
           echo "$IMAGE_URI"
 
           docker build \
             --build-arg REACT_APP_MOVIE_API_URL="$REACT_APP_MOVIE_API_URL" \
             -t "$IMAGE_URI" .
 
-          echo "Pushing image to ECR..."
+          echo "=========================================="
+          echo "PUSHING IMAGE TO ECR"
+          echo "=========================================="
 
           docker push "$IMAGE_URI"
 
@@ -173,11 +181,13 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Configure kubectl
+      # Configure kubectl for EKS
       # --------------------------------------------------------
       - name: Configure kubectl
         run: |
-          echo "Configuring kubectl for EKS..."
+          echo "=========================================="
+          echo "CONFIGURING KUBECTL FOR EKS"
+          echo "=========================================="
 
           aws eks update-kubeconfig \
             --region "$AWS_REGION" \
@@ -190,10 +200,6 @@ jobs:
       # ========================================================
       # EKS DIAGNOSTICS
       # ========================================================
-      # This is the important new section.
-      # It checks why Kubernetes has zero nodes.
-      # ========================================================
-
       - name: Diagnose EKS cluster
         run: |
 
@@ -251,7 +257,6 @@ jobs:
       # ========================================================
       # DEPLOY KUBERNETES
       # ========================================================
-
       - name: Deploy to Kubernetes
         working-directory: starter/frontend/k8s
         env:
@@ -259,13 +264,25 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
 
+          IMAGE_URI="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+
           echo ""
           echo "=========================================="
-          echo "SETTING KUBERNETES IMAGE"
+          echo "KUBERNETES IMAGE"
           echo "=========================================="
 
-          kustomize edit set image \
-            frontend="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          echo "$IMAGE_URI"
+
+
+          echo ""
+          echo "=========================================="
+          echo "UPDATING DEPLOYMENT IMAGE"
+          echo "=========================================="
+
+          sed -i "s|image: frontend|image: $IMAGE_URI|" deployment.yaml
+
+          echo "Updated deployment.yaml:"
+          cat deployment.yaml
 
 
           echo ""
@@ -273,7 +290,7 @@ jobs:
           echo "KUSTOMIZE CONFIGURATION"
           echo "=========================================="
 
-          kustomize build .
+          kubectl kustomize .
 
 
           echo ""
@@ -281,7 +298,7 @@ jobs:
           echo "APPLYING KUBERNETES MANIFESTS"
           echo "=========================================="
 
-          kustomize build . | kubectl apply -f -
+          kubectl apply -k .
 
 
           echo ""
@@ -311,6 +328,7 @@ jobs:
             echo "=========================================="
             echo "ROLLOUT FAILED"
             echo "=========================================="
+
 
             echo ""
             echo "=========================================="
@@ -383,4 +401,7 @@ jobs:
 
           kubectl get pods -o wide
 
+          echo ""
+
           kubectl get service frontend -o wide
+```
